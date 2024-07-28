@@ -1,5 +1,6 @@
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
+    message::Message,
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
 };
@@ -7,10 +8,14 @@ use solana_sdk::{
 use bs58;
 use std::io::{self, BufRead};
 
+use std::str::FromStr;
+
 const RPC_URL: &str = "https://api.devnet.solana.com";
 
 #[cfg(test)]
 mod tests {
+    use solana_sdk::{system_instruction::transfer, transaction::Transaction};
+
     use super::*;
 
     #[test]
@@ -90,5 +95,50 @@ mod tests {
     }
 
     #[test]
-    fn transfer() {}
+    fn transfer_sol() {
+        let kp = match read_keypair_file("dev-wallet.json") {
+            Ok(kp) => kp,
+            Err(e) => {
+                println!("Error: {:?}", e);
+                return;
+            }
+        };
+
+        let to_pubkey = Pubkey::from_str("9j3uYxDQdgZxncwHrtroGPwo9qw9RhbBJpnhcbkNsafT").unwrap();
+        let client = RpcClient::new(RPC_URL);
+
+        let balance = client
+            .get_balance(&kp.pubkey())
+            .expect("Failed to get balance!");
+        let latest_blockhash = client
+            .get_latest_blockhash()
+            .expect("Failed to get blockhash");
+
+        let message = Message::new_with_blockhash(
+            &[transfer(&kp.pubkey(), &to_pubkey, balance)],
+            Some(&kp.pubkey()),
+            &latest_blockhash,
+        );
+
+        // Calculate exact fee rate to transfer entire SOL amount out of account minus fees
+        let fee = client
+            .get_fee_for_message(&message)
+            .expect("Failed to get fee calculator");
+
+        let tx = Transaction::new_signed_with_payer(
+            &[transfer(&kp.pubkey(), &to_pubkey, balance - fee)],
+            Some(&kp.pubkey()),
+            &vec![kp],
+            latest_blockhash,
+        );
+
+        let sig = client
+            .send_and_confirm_transaction(&tx)
+            .expect("Failed to send tx");
+
+        println!(
+            "Success, Check out tx here: https://explorer.solana.com/tx/{}?cluster=devnet",
+            sig.to_string()
+        );
+    }
 }
