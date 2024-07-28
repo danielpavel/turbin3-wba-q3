@@ -1,22 +1,24 @@
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    message::Message,
-    pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signer},
-};
-
-use bs58;
-use std::io::{self, BufRead};
-
-use std::str::FromStr;
-
-const RPC_URL: &str = "https://api.devnet.solana.com";
+mod programs;
 
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{system_instruction::transfer, transaction::Transaction};
-
     use super::*;
+
+    use crate::programs::wba_prereqs::{CompleteArgs, WbaPrereqProgram};
+    use solana_client::rpc_client::RpcClient;
+    use solana_sdk::{
+        message::Message,
+        pubkey::Pubkey,
+        signature::{read_keypair_file, Keypair, Signer},
+    };
+    use solana_sdk::{system_instruction::transfer, system_program, transaction::Transaction};
+
+    use bs58;
+    use std::io::{self, BufRead};
+
+    use std::str::FromStr;
+
+    const RPC_URL: &str = "https://api.devnet.solana.com";
 
     #[test]
     fn keygen() {
@@ -139,6 +141,51 @@ mod tests {
         println!(
             "Success, Check out tx here: https://explorer.solana.com/tx/{}?cluster=devnet",
             sig.to_string()
+        );
+    }
+
+    #[test]
+    fn complete() {
+        let signer = match read_keypair_file("wba-wallet.json") {
+            Ok(kp) => kp,
+            Err(e) => {
+                println!("Error: {:?}", e);
+                return;
+            }
+        };
+
+        let rpc_client = RpcClient::new(RPC_URL);
+        let prereq = WbaPrereqProgram::derive_program_address(&[
+            b"prereq",
+            signer.pubkey().to_bytes().as_ref(),
+        ]);
+
+        let args = CompleteArgs {
+            github: b"danielpavel".to_vec(),
+        };
+
+        let accounts: [&Pubkey; 3] = [&signer.pubkey(), &prereq, &system_program::id()];
+
+        // get latest blockhash
+        let blockhash = rpc_client
+            .get_latest_blockhash()
+            .expect("Failed to get recent blockhash");
+
+        let tx = WbaPrereqProgram::complete(
+            &accounts,
+            &args,
+            Some(&signer.pubkey()),
+            &[&signer],
+            blockhash,
+        );
+
+        let sig = rpc_client
+            .send_and_confirm_transaction(&tx)
+            .expect("Failed to send tx");
+
+        println!(
+            "Success! Check out your TX here: https://explorer.solana.com/tx/{}/?cluster=devnet",
+            sig
         );
     }
 }
